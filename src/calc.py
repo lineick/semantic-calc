@@ -3,6 +3,9 @@ import gensim.downloader as api
 import numpy as np
 import re
 
+from sklearn.cluster import KMeans
+import numpy as np
+
 
 class SemCalculator:
     def __init__(self, base_vocab, model_name="word2vec-google-news-300"):
@@ -270,3 +273,62 @@ class SemCalculator:
         # Sort by largest average distance
         distances.sort(key=lambda x: x[1], reverse=True)
         return distances[:topn]
+
+    def find_top_words_by_clustering(self, pos_tags, num_clusters, top_n=10):
+        """
+        Find the top N words closest to the centroid in each cluster.
+
+        Parameters:
+        - sem_calc: An instance of SemCalculator.
+        - pos_tags: List of POS tags to include (e.g., ['NN'] for nouns).
+        - num_clusters: Number of clusters.
+        - top_n: Number of top words to return per cluster.
+
+        Returns:
+        - A dictionary mapping cluster indices to lists of top N words.
+        """
+        # Step 1: Extract words with specified POS tags
+        words = [
+            word
+            for word in self.vocab
+            if self.word_pos_tags.get(word, "") in pos_tags and word in self.model
+        ]
+
+        if len(words) < num_clusters:
+            raise ValueError(
+                f"Not enough words with POS tags {pos_tags} to form {num_clusters} clusters."
+            )
+
+        # Step 2: Embed the words
+        embeddings = [self.model[word] for word in words]
+        embeddings = np.array(embeddings)
+
+        # Step 3: Cluster the embeddings
+        print(f"Clustering {len(words)} words into {num_clusters} clusters...")
+        kmeans = KMeans(n_clusters=num_clusters, random_state=0, n_init="auto")
+        kmeans.fit(embeddings)
+        labels = kmeans.labels_
+        cluster_centers = kmeans.cluster_centers_
+
+        # Step 4: For each cluster, find top N words closest to the centroid
+        cluster_top_words = {}
+        for cluster_idx in range(num_clusters):
+            # Get indices of words in the current cluster
+            cluster_indices = np.where(labels == cluster_idx)[0]
+            cluster_embeddings = embeddings[cluster_indices]
+            cluster_words = [words[idx] for idx in cluster_indices]
+
+            # Compute distances to cluster centroid
+            centroid = cluster_centers[cluster_idx]
+            distances = np.linalg.norm(cluster_embeddings - centroid, axis=1)
+
+            # Get top N words closest to the centroid
+            sorted_indices = np.argsort(distances)
+            top_words = [cluster_words[idx] for idx in sorted_indices[:top_n]]
+            cluster_top_words[cluster_idx] = top_words
+
+            print(
+                f"Cluster {cluster_idx + 1}: Top {top_n} words: {', '.join(top_words)}"
+            )
+
+        return cluster_top_words
